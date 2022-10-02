@@ -10,6 +10,8 @@
 #define TUPLE_NUM 10
 #define PRE_NUM 10
 #define THREAD_NUM 2
+#define MAX_OPE 8  
+#define SLEEP_POS 7
 
 #define PAGE_SIZE 4096      // memory align用(?)のページサイズ
 // #define TUPLE_NUM 1000000   // データ数
@@ -17,8 +19,8 @@
 // #define PRE_NUM 1000000     // Transactionの件数
 #define SKEW_PER 0.0        // なにこれ？zipfで使ってる
 #define RW_RATE 50          // Read/Writeの比率
-#define MAX_OPE 16          // 各Preに入るOperationの総数,PRE_NUM * MAX_OPE分だけOperationがあるってことでOK?
-#define SLEEP_POS 15        // Operationの最後にSleepを入れる用？
+// #define MAX_OPE 16          // 各Preに入るOperationの総数,PRE_NUM * MAX_OPE分だけOperationがあるってことでOK?
+// #define SLEEP_POS 15        // Operationの最後にSleepを入れる用？
 #define SLEEP_TIME 100      // Operation::SLEEPで寝てる時間
 
 // commitしたものを数える用？
@@ -67,11 +69,11 @@ struct RWLock {
                 } else {
                     return false;
                 }
-            }
-            // counterの現在の値とexpectedを比較して、trueならcounterをdesiredで置き換え、そうじゃないならexpectedを現在のCounterで上書きする
-            // acq_relはacquireとrelease両方の性質を持っているらしい？
-            if (counter.compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
-                return true;
+                // counterの現在の値とexpectedを比較して、trueならcounterをdesiredで置き換え、そうじゃないならexpectedを現在のCounterで上書きする
+                // acq_relはacquireとrelease両方の性質を持っているらしい？
+                if (counter.compare_exchange_strong(expected, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                    return true;
+                }
             }
         }
 
@@ -263,7 +265,9 @@ void worker(int thID, int &ready, const bool &start, const bool &quit) {
         if (!__atomic_load_n(&start, __ATOMIC_ACQUIRE)) break;
     }
 
-    // quitがfalseの間Transactionを生成し続けるよ
+    std::cout << "thID:" << thID << " start" << std::endl;
+
+    // quitがfalseの間Transactionを実行し続けるよ
     while (true) {
         if (__atomic_load_n(&quit, __ATOMIC_ACQUIRE)) break;
         if (tx_pos >= PRE_NUM / THREAD_NUM * (thID + 1)) return;    // ここでreturnしてるから被りはないけど,端数は?
@@ -271,9 +275,13 @@ void worker(int thID, int &ready, const bool &start, const bool &quit) {
         // Q : work_txを介さないといけない理由がわからんけど、直接だとcompile errorになる
         Pre &work_tx = std::ref(Pre_tx_set[tx_pos]);
         trans.task_set = work_tx.task_set;
+
+        std::cout << "thID:" << thID << " task[" << tx_pos << "] started" << std::endl;
+
         tx_pos++;
 
         RETRY:  // GOTOで飛んでくるところ
+        std::cout << "thID:" << thID << " task[" << tx_pos << "] REstarted" << std::endl;
         if (__atomic_load_n(&quit, __ATOMIC_ACQUIRE)) break;
         trans.begin();
 
@@ -347,32 +355,35 @@ void worker(int thID, int &ready, const bool &start, const bool &quit) {
 
             if (trans.status == Status::Aborted) {
                 trans.abort();
+                // std::cout << "thID:" << thID << " aborted" << std::endl;
                 goto RETRY; // 本来ならgotoを安易に使うとプログラムの流れが不安定になるから使わない方が良いけど、abortしたTransactionはretryしたいから仕方ないンゴね
             }
 
         }
+
+        printf("thID:%d | all locks have been acquired\n", thID);
 
         // lockの確認ができたから処理を行うよ
         for (auto &task : trans.task_set) {
             switch (task.ope)
             {
             case Operation::READ:
-                std::cout << "READ" << std::endl;
+                std::cout << "thID:" << thID << " READ" << std::endl;
                 trans.read(task.key);
                 break;
 
             case Operation::WRITE:
-                std::cout << "WRITE" << std::endl;
+                std::cout << "thID:" << thID << " WRITE" << std::endl;
                 trans.write(task.key);
                 break;
 
             case Operation::SLEEP:
-                std::cout << "SLEEP" << std::endl;
+                std::cout << "thID:" << thID << " SLEEP" << std::endl;
                 std::this_thread::sleep_for(std::chrono::microseconds(SLEEP_TIME));
                 break;
 
             default:
-            std::cout << "おい！なんか変だぞ！！" << std::endl;
+                std::cout << "おい！なんか変だぞ！！" << std::endl;
                 break;
             }
         }
