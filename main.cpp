@@ -83,7 +83,7 @@ struct RWLock {
             int expected, desired = -1;
             expected = counter.load(std::memory_order_acquire);
             for (;;) {
-                if (expected != -1) {   //自分以外がread/write lockを取得しているなら
+                if (expected != 1) {   //自分以外がread/write lockを取得しているなら
                     return false;
                 }
                 if (counter.compare_exchange_strong(expected, desired, std::memory_order_acq_rel)) {
