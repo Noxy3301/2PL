@@ -165,14 +165,13 @@ struct TxExecutor {
                 if (op_set.key == key) return;
             }
             // 自分が既にreadしている && 自分しかreadしてないならupgradeする
-            // itr形式じゃなくてもいけそうじゃね？後で変えてみる
-            // と思ったけど、特定のやつをvectorから消すならitrで情報を保持しておいた方が楽かも
+            // itr形式じゃなくてもいけそうじゃね？と思ったけど,特定のやつをvectorから消すならitrで情報を保持しておいた方が楽かも
             for (auto itr = read_set.begin(); itr != read_set.end(); itr++) {
-                if ((*itr).key == key) {
+                if ((*itr).key == key) {    // read setの中にkeyがある
                     if (!(*itr).tuple->lock.try_upgrade()) {
                         status = Status::Aborted;
                         return;
-                    } else {
+                    } else {    // try_upgrade行けるわよ！(自分しかreadしてなかった)
                         for (auto lock_itr = r_lock_list.begin(); lock_itr != r_lock_list.end(); lock_itr++) {
                             if (*lock_itr == &((*itr).tuple->lock)) {
                                 write_set.emplace_back(key, 100, (*itr).tuple);
